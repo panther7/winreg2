@@ -1,5 +1,12 @@
 import { describe, expect, test } from '@jest/globals';
-import { Registry, Hive, RegType } from './index';
+import {
+    type WinRegWriteValue,
+    Registry,
+    Hive,
+    RegType,
+    writeToRegistry,
+    deleteFromRegistry,
+} from './index';
 describe('winreg', () => {
 
     test('running on Windows', () => expect(process.platform).toBe('win32'));
@@ -93,6 +100,30 @@ describe('winreg', () => {
             test('regKey is missing after being destroyed', async () => await expect(regKey.keyExists()).resolves.toBeFalsy());
 
         }); // end - describe destroy()
+
+        describe.only('import()', () => {
+            const regHive = Hive.HKCU;
+            const regPath = '\\winreg_test';
+            const regName = 'TestValue';
+            const regValue = '"TestValueData\\Super"';
+            const regKey = new Registry({ hive: regHive, key: regPath });
+
+            test('write value to registry', async () => await expect(writeToRegistry(regHive, [regPath, regName, RegType.REG_SZ, regValue])).resolves.toBeUndefined());
+            test('exists after writing to registry', async () => await expect(regKey.keyExists()).resolves.toBeTruthy());
+
+            const multipleValues = Array<WinRegWriteValue>(
+                [regPath, `${regName}2`, RegType.REG_SZ, regValue],
+                [regPath, `${regName}3`, RegType.REG_SZ, regValue],
+            );
+            test('write multiple values to registry', async () => await expect(writeToRegistry(regHive, multipleValues)).resolves.toBeUndefined());
+            test('exists last multiple value', async () => expect((await regKey.get(multipleValues.at(-1)?.[1] || '')).value).toBe(multipleValues.at(-1)?.[3]));
+
+            test('delete value from registry', async () => await expect(deleteFromRegistry(regHive, [[regPath, regName]])).resolves.toBeUndefined());
+            test('does not exist after deleting from registry', async () => await expect(regKey.valueExists(regName)).resolves.toBeFalsy());
+
+            test('delete key from registry', async () => await expect(deleteFromRegistry(regHive, [[regPath]])).resolves.toBeUndefined());
+            test('does not exist after deleting key from registry', async () => await expect(regKey.keyExists()).resolves.toBeFalsy());
+        }); // end - describe import
 
     }); // end - describe Registry
 
