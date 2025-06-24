@@ -169,7 +169,10 @@ export class Registry {
     static DEFAULT_VALUE = '';
 
     /** Path of REG.exe used. */
-    static REG_PATH = join(process.env.windir || '', 'system32', 'reg.exe');
+    static REG_PATH = join(process.env.windir || '', 'System32/reg.exe');
+
+    /** Path of PowerShell used. */
+    static PS_PATH = join(process.env.windir || '', 'System32/WindowsPowerShell/v1.0/powershell.exe');
 
     /** Private utility function to execute a command and return output. */
     private async runCommand(args: string[]): Promise<string>{
@@ -201,7 +204,7 @@ export class Registry {
         return await new Promise((res, rej) => {
             let regCommand = 'chcp 65001; ' + [Registry.REG_PATH, ...args].join(' ');
             // console.log(`Will run ${regCommand}`);
-            let child = exec(regCommand, {shell:"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"}, (err, stdout, stderr) => {
+            let child = exec(regCommand, {shell:Registry.PS_PATH}, (err, stdout, stderr) => {
                 if (err) {
                     rej(mkErrorMsg(args[0], child.exitCode || 0, { stdout, stderr }));
                 }
