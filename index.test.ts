@@ -17,7 +17,7 @@ describe('winreg', () => {
         key: '\\Software'
     });
     let utf8ValueName = "\u0628\u0639\u0636\u0020\u0627\u0633\u0645\u0020\u0627\u0644\u0642\u064a\u0645\u0629";
-    let utf8ValueData = "小鹤双拼*2*^*iuvdjhcwfg^xmlnpbksqszxkrltv```y``ovt`";
+    let utf8ValueData = '小鹤双拼*2*^*iuvdjhcwfg^xmlnpbksqszxkrltv```y``ovt`, ":)"';
 
     test('softwareKey is instance of Registry', () => expect(softwareKey).toBeInstanceOf(Registry));
 
