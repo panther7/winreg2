@@ -11,7 +11,6 @@ import { format } from 'node:util';
 import { join } from 'node:path';
 import { exec } from 'node:child_process';
 
-if(process.platform !== 'win32') throw new Error('This library is only avaliable on Windows.');
 /** The registry hive IDs */
 export const enum Hive {
     HKLM = 'HKEY_LOCAL_MACHINE',
