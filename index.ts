@@ -10,6 +10,8 @@
 import { format } from 'node:util';
 import { join } from 'node:path';
 import { exec } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { unlink, writeFile } from 'node:fs/promises';
 
 /** The registry hive IDs */
 export const enum Hive {
@@ -54,6 +56,17 @@ const
 /** Escape backticks */
 function quoteAround(str: string) {
     return `"${str.replace(/`/g, "``").replace(/"/g, "\\`\"").replace(/\$/g, "`$").replace(/[\u0000-\u001F\u007F-\u009F]/g,"")}"`
+}
+
+export async function importFile(filePath:string) {
+    return new Promise<boolean>((res, rej) => {
+        const child = exec([Registry.REG_PATH, 'IMPORT', quoteAround(filePath)].join(' '), {shell:Registry.PS_PATH}, (err, stdout, stderr) => {
+            if (err) {
+                rej(mkErrorMsg(filePath, child.exitCode || 0, { stdout, stderr }));
+            }
+            else res(true);
+        });
+    });
 }
 
 class ProcessUncleanExitError extends Error {
@@ -349,5 +362,155 @@ export class Registry {
             if (err.code == 1) return false;
             else throw err;
         });
+    }
+}
+
+// ---
+
+export type WinRegWriteValue = [string, string, RegType, string];
+export type WinRegDeleteValue = [string, string?];
+
+const EOL = '\r\n';
+const winRegFileHeader = `Windows Registry Editor Version 5.00${EOL}${EOL}`;
+
+/** Writes values to the Windows Registry by generating a .reg file and importing it.
+ * @param {Hive} hive - The registry hive to write to.
+ * @param {WinRegWriteValue | WinRegWriteValue[]} values - An array of values to write, each represented as a tuple of [key, name, type, value].
+ * @returns {Promise<void>} A promise that resolves when the values have been written.
+ */
+export async function writeToRegistry(hive: Hive, values: WinRegWriteValue | WinRegWriteValue[]) {
+    const _values = (Array.isArray(values[0]) ? values : [values]) as WinRegWriteValue[];
+    const regContent = generateRegFileContent(hive, _values);
+    return writeToDataRegistry(regContent);
+}
+
+type WinRegWriteOrDeleteValue = WinRegWriteValue | WinRegDeleteValue;
+/** Deletes values from the Windows Registry by generating a .reg file and importing it.
+ * @param {Hive} hive - The registry hive to delete from.
+ * @param {WinRegWriteOrDeleteValue | WinRegWriteOrDeleteValue[]} values - An array of values to delete, each represented as a tuple of [key, name?].
+ * @returns {Promise<void>} A promise that resolves when the values have been deleted.
+ */
+export async function deleteFromRegistry(hive: Hive, values: WinRegWriteOrDeleteValue | WinRegWriteOrDeleteValue[]) {
+    const _values = (Array.isArray(values[0]) ? values : [values]) as WinRegWriteOrDeleteValue[];
+    const regContent = generateDeleteRegFileContent(hive, _values);
+    return writeToDataRegistry(regContent);
+}
+
+function formatRegValue(name: string, type: RegType, value: string): string {
+    const quotedName = name === Registry.DEFAULT_VALUE ? '@' : `"${name}"`;
+
+    switch (type) {
+        case RegType.REG_DWORD: {
+            const hexValue = parseInt(value, 10).toString(16).padStart(8, '0');
+            return `${quotedName}=dword:${hexValue}`;
+        }
+        case RegType.REG_SZ:
+        default: {
+            const escapedValue = value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            return `${quotedName}="${escapedValue}"`;
+        }
+    }
+}
+
+function generateRegFileContent(hive: Hive, values: WinRegWriteValue[]): string {
+    const keyGroups = new Map<string, WinRegWriteValue[]>();
+
+    let content = winRegFileHeader;
+
+    // Group values by key
+    for (const value of values) {
+        const [key] = value;
+
+        if (!keyGroups.has(key)) {
+            keyGroups.set(key, []);
+        }
+        const keyGroup = keyGroups.get(key);
+
+        if (keyGroup) {
+            keyGroup.push(value);
+        }
+    }
+
+    // Generate content for each key
+    for (const [key, keyValues] of keyGroups) {
+        content += `[${hive}${key}]${EOL}`;
+
+        for (const [, name, type, value] of keyValues) {
+            const regValue = formatRegValue(name, type, value);
+            content += `${regValue}${EOL}`;
+        }
+
+        content += EOL;
+    }
+
+    return content;
+}
+
+function generateDeleteRegFileContent(hive: Hive, values: Array<WinRegDeleteValue | WinRegWriteValue>): string {
+    const keyGroups = new Map<string, string[]>();
+    const keysToDelete = new Set<string>();
+
+    let content = winRegFileHeader;
+
+    // Group values by key
+    for (const [key, name] of values) {
+        if (name === undefined) {
+            keysToDelete.add(key);
+        } else {
+            if (!keyGroups.has(key)) {
+                keyGroups.set(key, []);
+            }
+            const keyGroup = keyGroups.get(key);
+
+            if (keyGroup) {
+                keyGroup.push(name);
+            }
+        }
+    }
+
+    // Generate deletion commands for specific values
+    for (const [key, names] of keyGroups) {
+        content += `[${hive}${key}]${EOL}`;
+
+        for (const name of names) {
+            content += `"${name}"=-${EOL}`;
+        }
+
+        content += EOL;
+    }
+
+    // Generate deletion commands for entire keys
+    for (const key of keysToDelete) {
+        content += `[-${hive}${key}]${EOL}${EOL}`;
+    }
+
+    return content;
+}
+
+async function writeToDataRegistry(regContent: string) {
+    // Create temporary registry file
+    const tempFilePath = join(tmpdir(), `registry-${Math.random()}.reg`);
+
+    try {
+        // Add BOM for UTF-16LE and write file
+        const bom = Buffer.from([0xFF, 0xFE]); // UTF-16LE BOM
+        const contentBuffer = Buffer.from(regContent, 'utf16le');
+        const finalBuffer = Buffer.concat([bom, contentBuffer]);
+        
+        await writeFile(tempFilePath, finalBuffer);
+
+        // Import registry file
+        await importFile(tempFilePath);
+
+        console.debug('Registry deletion file imported successfully');
+    } catch (error) {
+        console.warn('Failed to import registry deletion file:', error);
+    } finally {
+        // Clean up temporary file
+        try {
+            await unlink(tempFilePath);
+        } catch (unlinkError) {
+            console.warn('Failed to delete temporary registry file:', unlinkError);
+        }
     }
 }
