@@ -54,7 +54,7 @@ const
 
 /** Escape backticks */
 function quoteAround(str: string) {
-    return `"${str.replace(/`/g, "``").replace(/\$/g, "`$").replace(/[\u0000-\u001F\u007F-\u009F]/g,"")}"`
+    return `"${str.replace(/`/g, "``").replace(/"/g, "\\`\"").replace(/\$/g, "`$").replace(/[\u0000-\u001F\u007F-\u009F]/g,"")}"`
 }
 
 class ProcessUncleanExitError extends Error {
